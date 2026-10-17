@@ -1,0 +1,32 @@
+{
+  "name": "@flowpilot/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@flowpilot/shared": "workspace:*",
+    "@prisma/orm-postgres": "8.0.0-rc.18",
+    "pg": "^8.23.1"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "contract:emit": "prisma contract emit"
+  },
+  "devDependencies": {
+    "@prisma/cli-engine": "0.7.0",
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "dotenv": "^18.0.8",
+    "prisma": "8.0.0-rc.23",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,0 +1,180 @@
+// use prisma-8
+
+native_enum ExecutionStatus {
+  queued    = "queued"
+  running   = "running"
+  succeeded = "succeeded"
+  failed    = "failed"
+  cancelled = "cancelled"
+}
+
+native_enum NodeStatus {
+  pending      = "pending"
+  running      = "running"
+  waiting_retry = "waiting_retry"
+  succeeded    = "succeeded"
+  failed       = "failed"
+  skipped      = "skipped"
+  cancelled    = "cancelled"
+}
+
+model User {
+  id           Uuid      @id @default(sql`gen_random_uuid()`)
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @map("updated_at")
+  disabledAt   DateTime? @map("disabled_at")
+
+  sessions    Session[]
+  workflows   Workflow[]
+  executions  WorkflowExecution[]
+  credentials Credential[]
+  versionsCreated WorkflowVersion[] @relation("WorkflowVersionCreator")
+
+  @@map("users")
+}
+
+model Session {
+  id         Uuid     @id @default(sql`gen_random_uuid()`)
+  userId     Uuid     @map("user_id")
+  tokenHash  String   @unique @map("token_hash")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Workflow {
+  id          Uuid      @id @default(sql`gen_random_uuid()`)
+  ownerId     Uuid      @map("owner_id")
+  name        VarChar(120)
+  description String?
+  draft       Json
+  revision    Int       @default(1)
+  archivedAt  DateTime? @map("archived_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @map("updated_at")
+
+  owner      User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  versions   WorkflowVersion[]
+  executions WorkflowExecution[]
+
+  @@map("workflows")
+}
+
+model WorkflowVersion {
+  id             Uuid     @id @default(sql`gen_random_uuid()`)
+  workflowId     Uuid     @map("workflow_id")
+  versionNumber  Int      @map("version_number")
+  definition     Json
+  definitionHash Char(64) @map("definition_hash")
+  schemaVersion  SmallInt @map("schema_version")
+  createdBy      Uuid?    @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  creator  User?    @relation("WorkflowVersionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  executions WorkflowExecution[]
+
+  @@unique([workflowId, versionNumber])
+  @@index([workflowId, definitionHash])
+  @@map("workflow_versions")
+}
+
+model WorkflowExecution {
+  id                    Uuid            @id @default(sql`gen_random_uuid()`)
+  ownerId               Uuid            @map("owner_id")
+  workflowId            Uuid            @map("workflow_id")
+  workflowVersionId     Uuid            @map("workflow_version_id")
+  status                ExecutionStatus @default(queued)
+  triggerType           String          @map("trigger_type")
+  triggerPayload        Json            @default(json`{}`) @map("trigger_payload")
+  idempotencyKey        String?         @map("idempotency_key")
+  idempotencyRequestHash String?        @map("idempotency_request_hash")
+  leaseOwner            String?         @map("lease_owner")
+  leaseEpoch            Int             @default(0) @map("lease_epoch")
+  leaseExpiresAt        DateTime?       @map("lease_expires_at")
+  cancelRequestedAt     DateTime?       @map("cancel_requested_at")
+  lastEventSeq          Int             @default(0) @map("last_event_seq")
+  error                 Json?
+  queuedAt              DateTime        @default(now()) @map("queued_at")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  startedAt             DateTime?       @map("started_at")
+  finishedAt            DateTime?       @map("finished_at")
+
+  owner    User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  workflow Workflow       @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  version  WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Restrict)
+  nodes    NodeExecution[]
+  events   ExecutionEvent[]
+
+  @@index([ownerId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workflowId, createdAt(sort: Desc)])
+  @@index([leaseExpiresAt])
+  @@map("workflow_executions")
+}
+
+model NodeExecution {
+  id              Uuid      @id @default(sql`gen_random_uuid()`)
+  executionId     Uuid      @map("execution_id")
+  nodeId          String    @map("node_id")
+  nodeType        String    @map("node_type")
+  status          NodeStatus @default(pending)
+  attempt         Int       @default(0)
+  maxAttempts     Int       @map("max_attempts")
+  skipReason      String?   @map("skip_reason")
+  input           Json?
+  resolvedConfig  Json?     @map("resolved_config")
+  output          Json?
+  outputTruncated Boolean   @default(false) @map("output_truncated")
+  activePorts     String[]  @default([]) @map("active_ports")
+  error           Json?
+  meta            Json?
+  nextAttemptAt   DateTime? @map("next_attempt_at")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+
+  execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@unique([executionId, nodeId])
+  @@index([executionId])
+  @@map("node_executions")
+}
+
+model ExecutionEvent {
+  executionId Uuid     @map("execution_id")
+  seq         Int
+  type        String
+  nodeId      String?  @map("node_id")
+  level       String?
+  data        Json     @default(json`{}`)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@id([executionId, seq])
+  @@map("execution_events")
+}
+
+model Credential {
+  id            Uuid      @id @default(sql`gen_random_uuid()`)
+  ownerId       Uuid      @map("owner_id")
+  name          VarChar(100)
+  type          String
+  encryptedData Bytes     @map("encrypted_data")
+  keyVersion    SmallInt  @default(1) @map("key_version")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
+  lastUsedAt    DateTime? @map("last_used_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, name])
+  @@map("credentials")
+}

@@ -1,0 +1,37 @@
+cat > .gitignore <<'EOF'
+# Dependencies
+node_modules/
+.pnp.*
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+coverage/
+.turbo/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Test and tooling caches
+.nyc_output/
+.eslintcache
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+EOF
