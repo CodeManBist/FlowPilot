@@ -1,4 +1,3 @@
-
 import { describe, expect, it } from "vitest";
 import { validWorkflow } from "./fixtures/valid-workflow.js";
 import { validateWorkflow } from "./validate.js";
@@ -7,10 +6,7 @@ describe("validateWorkflow", () => {
   it("reports duplicate node IDs", () => {
     const duplicateNodeWorkflow = {
       ...validWorkflow,
-      nodes: [
-        ...validWorkflow.nodes,
-        { ...validWorkflow.nodes[0] },
-      ],
+      nodes: [...validWorkflow.nodes, { ...validWorkflow.nodes[0] }],
     };
 
     const issues = validateWorkflow(duplicateNodeWorkflow);
@@ -27,10 +23,7 @@ describe("validateWorkflow", () => {
   it("reports duplicate edge IDs", () => {
     const duplicateEdgeWorkflow = {
       ...validWorkflow,
-      edges: [
-        ...validWorkflow.edges,
-        { ...validWorkflow.edges[0] },
-      ],
+      edges: [...validWorkflow.edges, { ...validWorkflow.edges[0] }],
     };
 
     const issues = validateWorkflow(duplicateEdgeWorkflow);
@@ -70,7 +63,6 @@ describe("validateWorkflow", () => {
     );
   });
 
-  
   it("reports a cycle between two nodes", () => {
     const cyclicWorkflow = {
       ...validWorkflow,
@@ -120,5 +112,4 @@ describe("validateWorkflow", () => {
       }),
     );
   });
-
 });
