@@ -16,6 +16,9 @@ out/
 coverage/
 .turbo/
 
+# Vitest reports and artifacts
+.vitest/
+
 # Logs
 *.log
 npm-debug.log*
