@@ -1,4 +1,3 @@
-
 import { z } from "zod";
 
 const WorkflowSettingsSchema = z
@@ -52,9 +51,7 @@ export const WorkflowDefinitionSchema = z
   })
   .strict();
 
-export type WorkflowDefinition = z.infer<
-  typeof WorkflowDefinitionSchema
->;
+export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 
 export type WorkflowNode = z.infer<typeof WorkflowNodeSchema>;
 
