@@ -1,24 +1,44 @@
 import type { ValidationIssue } from "./validation-types.js";
+import { WorkflowDefinitionSchema } from "./schema.js";
+import type { NodeRegistry } from "./node-registry.js";
 
-interface WorkflowNode {
-  id: string;
+interface DfsFrame {
+  nodeId: string;
+  nextNeighborIndex: number;
 }
 
-interface WorkflowEdge {
-  id: string;
-  source: { nodeId: string; port: string };
-  target: { nodeId: string; port: string };
-}
-
-interface WorkflowDefinition {
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
-}
+type DfsState = 0 | 1 | 2;
 
 export function validateWorkflow(
-  definition: WorkflowDefinition,
+  input: unknown,
+  registry: NodeRegistry,
 ): ValidationIssue[] {
+  const result = WorkflowDefinitionSchema.safeParse(input);
+
+  // Return schema errors before running graph checks.
+  if (!result.success) {
+    return result.error.issues.map((issue) => ({
+      code: "SCHEMA_INVALID",
+      severity: "error",
+      message: issue.message,
+      path: issue.path.join("."),
+    }));
+  }
+
+  const definition = result.data;
   const issues: ValidationIssue[] = [];
+
+  // Check whether node types and versions are supported.
+  for (const node of definition.nodes) {
+    if (!registry.supports(node.type, node.typeVersion)) {
+      issues.push({
+        code: "NODE_TYPE_UNSUPPORTED",
+        severity: "error",
+        message: `Unsupported node type or version: ${node.type}@${node.typeVersion}`,
+        nodeId: node.id,
+      });
+    }
+  }
 
   // Check for duplicate node IDs.
   const seenNodeIds = new Set<string>();
@@ -73,24 +93,25 @@ export function validateWorkflow(
       issues.push({
         code: "SELF_LOOP",
         severity: "error",
-        message: `Edge ${edge.id} connects a node to  itself`,
+        message: `Edge ${edge.id} connects a node to itself`,
         nodeId: edge.source.nodeId,
         edgeId: edge.id,
       });
     }
   }
 
-  // Detect cycles using Kahn's algorithm.
+  // Build the graph for cycle detection.
   const indegree = new Map<string, number>();
   const adjacency = new Map<string, string[]>();
 
   for (const node of definition.nodes) {
-    indegree.set(node.id, 0);
-    adjacency.set(node.id, []);
+    if (!indegree.has(node.id)) {
+      indegree.set(node.id, 0);
+      adjacency.set(node.id, []);
+    }
   }
 
-  // Build the graph, ignoring edges whose endpoints do   not exist
-  // and self-loops already reported above.
+  // Ignore invalid endpoints and self-loops already reported above.
   for (const edge of definition.edges) {
     const sourceId = edge.source.nodeId;
     const targetId = edge.target.nodeId;
@@ -107,7 +128,7 @@ export function validateWorkflow(
     indegree.set(targetId, indegree.get(targetId)! + 1);
   }
 
-  // Start with all nodes that have no incoming edges.
+  // Kahn's algorithm: start with nodes that have no incoming edges.
   const queue: string[] = [];
 
   for (const [nodeId, count] of indegree) {
@@ -116,7 +137,6 @@ export function validateWorkflow(
     }
   }
 
-  // Remove nodes and update their neighbors' indegrees.
   let processedCount = 0;
   let queueIndex = 0;
 
@@ -134,16 +154,81 @@ export function validateWorkflow(
     }
   }
 
-  // If some nodes could not be   processed, a cycle exists.
-  if (processedCount < definition.nodes.length) {
-    const cycleNodeIds = [...indegree.entries()]
-      .filter(([, count]) => count > 0)
-      .map(([nodeId]) => nodeId);
+  // If Kahn's algorithm cannot process every unique node,
+  // search the remaining graph for an ordered cycle path.
+  if (processedCount < indegree.size) {
+    const state = new Map<string, DfsState>();
+
+    for (const nodeId of indegree.keys()) {
+      state.set(nodeId, 0);
+    }
+
+    let cyclePath: string[] | undefined;
+
+    // Only explore nodes left with positive indegree.
+    for (const [startNodeId, remainingIndegree] of indegree) {
+      if (remainingIndegree === 0 || state.get(startNodeId) !== 0) {
+        continue;
+      }
+
+      const stack: DfsFrame[] = [{ nodeId: startNodeId, nextNeighborIndex: 0 }];
+      const activePath: string[] = [startNodeId];
+      const activePathIndex = new Map<string, number>([[startNodeId, 0]]);
+
+      state.set(startNodeId, 1);
+
+      while (stack.length > 0 && !cyclePath) {
+        const frame = stack[stack.length - 1]!;
+        const neighbors = adjacency.get(frame.nodeId)!;
+
+        if (frame.nextNeighborIndex >= neighbors.length) {
+          state.set(frame.nodeId, 2);
+          activePathIndex.delete(frame.nodeId);
+          activePath.pop();
+          stack.pop();
+          continue;
+        }
+
+        const neighborId = neighbors[frame.nextNeighborIndex]!;
+        frame.nextNeighborIndex++;
+
+        // Ignore nodes Kahn's algorithm already removed.
+        if (indegree.get(neighborId) === 0) {
+          continue;
+        }
+
+        const neighborState = state.get(neighborId)!;
+
+        if (neighborState === 0) {
+          state.set(neighborId, 1);
+          activePathIndex.set(neighborId, activePath.length);
+          activePath.push(neighborId);
+
+          stack.push({
+            nodeId: neighborId,
+            nextNeighborIndex: 0,
+          });
+        } else if (neighborState === 1) {
+          const cycleStartIndex = activePathIndex.get(neighborId)!;
+          cyclePath = [...activePath.slice(cycleStartIndex), neighborId];
+        }
+      }
+
+      if (cyclePath) {
+        break;
+      }
+    }
+
+    const cycleNodeIds = cyclePath ?? [
+      ...[...indegree.entries()]
+        .filter(([, count]) => count > 0)
+        .map(([nodeId]) => nodeId),
+    ];
 
     issues.push({
       code: "CYCLE_DETECTED",
       severity: "error",
-      message: `Cycle detected  involving nodes: $ {cycleNodeIds.join(", ")}`,
+      message: `Cycle detected: ${cycleNodeIds.join(" -> ")}`,
     });
   }
 
